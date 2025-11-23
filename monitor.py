@@ -159,7 +159,7 @@ async def check_with_openai(text: str) -> bool:
 
 # ВРЕМЕННО: Слушаем ВСЕ чаты, чтобы найти проблему
 # Убрали chats=MONITORED_CHATS, чтобы слышать всё
-@client.on(events.NewMessage(chats=MONITORED_CHATS)) # ВЕРНУТЬ ФИЛЬТР!
+@client.on(events.NewMessage(chats=MONITORED_CHATS))
 async def handler(event):
 
     """Обработчик новых сообщений (DEBUG VERSION)"""
@@ -240,14 +240,24 @@ async def handler(event):
 
 def main():
     """Главная функция"""
-    client.start()
     print('Подключено к Telegram', flush=True)
     print(f'Мониторинг чатов: {MONITORED_CHATS}', flush=True)
     print(f'AI включен: {AI_ENABLED}', flush=True)
     print(f'Trigger слова: {TRIGGER_WORDS}', flush=True)
     print('Ожидание сообщений...\n', flush=True)
     
-    client.run_until_disconnected()
+    # Auto-reconnection loop
+    while True:
+        try:
+            if not client.is_connected():
+                print("Connecting...", flush=True)
+                client.start()
+            
+            client.run_until_disconnected()
+        except Exception as e:
+            print(f"Monitor crashed: {e}. Restarting in 5s...", flush=True)
+            import time
+            time.sleep(5)
 
 
 if __name__ == '__main__':

@@ -37,6 +37,14 @@ if os.path.exists(CONFIG_FILE):
 else:
     config = {}
 
+
+def mask_string(s: str, visible_chars: int = 4) -> str:
+    """Mask sensitive string showing only first 2 and last N chars"""
+    if not s or len(str(s)) <= visible_chars:
+        return s
+    s_str = str(s)
+    return s_str[:2] + "*" * (len(s_str) - visible_chars - 2) + s_str[-visible_chars:]
+
 # Pydantic models
 class TelegramConfig(BaseModel):
     api_id: int
@@ -122,40 +130,6 @@ async def save_telegram_config(data: dict):
     telegram_config["phone"] = data.get("phone")
     telegram_config["session"] = data.get("session", "telegram_session")
     
-    # Save to config.json
-    config['telegram'] = telegram_config
-    save_config()
-    
-    return {"status": "success"}
-
-@app.get("/api/telegram/status")
-async def get_telegram_status():
-    global telegram_client
-    
-    if not telegram_client:
-        return {"authorized": False, "message": "Не авторизован"}
-    
-    try:
-        if await telegram_client.is_user_authorized():
-            me = await telegram_client.get_me()
-            # Convert user object to dict safely
-            user_dict = me.to_dict() if hasattr(me, 'to_dict') else {}
-            return {
-                "authorized": True,
-                "user": {
-                    "first_name": user_dict.get('first_name', ''),
-                    "last_name": user_dict.get('last_name', ''),
-                    "username": user_dict.get('username', '')
-                }
-            }
-        else:
-            return {"authorized": False, "message": "Требуется авторизация"}
-    except:
-        return {"authorized": False, "message": "Ошибка проверки статуса"}
-
-@app.post("/api/telegram/auth/start")
-async def start_auth():
-    # ПРОВЕРКА что настройки сохранены
     if not telegram_config.get("api_id") or not telegram_config.get("api_hash"):
         raise HTTPException(status_code=400, detail="Сначала сохраните настройки Telegram через кнопку 'Сохранить настройки'")
     
@@ -183,6 +157,34 @@ async def start_auth():
         print(f"ERROR: {e}")
         print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Ошибка авторизации: {str(e)}")
+
+@app.post("/api/telegram/auth/start")
+async def start_telegram_auth():
+    global telegram_client
+    
+    if not telegram_config.get("phone"):
+        raise HTTPException(status_code=400, detail="Phone number not set")
+    
+    try:
+        if not telegram_client:
+            telegram_client = TelegramClient(
+                telegram_config['session'],
+                int(telegram_config['api_id']),
+                telegram_config['api_hash']
+            )
+        
+        if not telegram_client.is_connected():
+            await telegram_client.connect()
+            
+        if not await telegram_client.is_user_authorized():
+            await telegram_client.send_code_request(telegram_config["phone"])
+            return {"status": "success", "message": "Code sent"}
+        else:
+            return {"status": "success", "message": "Already authorized"}
+            
+    except Exception as e:
+        print(f"Auth error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/telegram/auth/code")
 async def submit_auth_code(auth_code: AuthCode):
@@ -244,7 +246,37 @@ async def submit_auth_password(auth_password: AuthPassword):
         "user": user_data
     }
 
-# Chats API endpoints
+@app.get("/api/telegram/status")
+async def get_telegram_status():
+    global telegram_client
+    
+    # 1. Если клиент уже в памяти и авторизован
+    if telegram_client:
+        if await telegram_client.is_user_authorized():
+            return {"authorized": True}
+
+    # 2. Если клиента нет, но есть файл сессии на диске — пробуем восстановить
+    session_name = telegram_config.get("session", "telegram_session")
+    session_file = f"{session_name}.session"
+    if os.path.exists(session_file):
+        try:
+            if not telegram_client:
+                 telegram_client = TelegramClient(
+                    session_name,
+                    int(telegram_config['api_id']),
+                    telegram_config['api_hash']
+                )
+            
+            if not telegram_client.is_connected():
+                await telegram_client.connect()
+            
+            if await telegram_client.is_user_authorized():
+                return {"authorized": True}
+        except Exception as e:
+            print(f"Error restoring session: {e}")
+            
+    return {"authorized": False}
+
 @app.get("/api/chats/list")
 async def get_chats():
     global telegram_client
@@ -294,20 +326,17 @@ async def save_chats(chat_selection: ChatSelection):
     save_config()
     return {"status": "success"}
 
-# Keywords API endpoints
-# DEPRECATED: These endpoints are no longer used, replaced by AI filtering
-
 # Webhook API endpoints
 @app.post("/api/webhook/save")
 async def save_webhook(webhook: WebhookConfig):
-    config['webhook_url'] = webhook.url  # ИСПРАВИТЬ
+    config['webhook_url'] = webhook.url
     save_config()
     return {"status": "success"}
 
 
 @app.post("/api/webhook/test")
 async def test_webhook():
-    if not config.get('webhook_url'):  # ИСПРАВИТЬ
+    if not config.get('webhook_url'):
         raise HTTPException(status_code=400, detail="Webhook URL not configured")
     
     test_data = {
@@ -425,6 +454,11 @@ async def start_monitoring():
     try:
         print("Запуск мониторинга через monitor.py...")
         
+        # Disconnect main process client to release database lock
+        if telegram_client and telegram_client.is_connected():
+            print("Отключение основного клиента для освобождения БД...", flush=True)
+            await telegram_client.disconnect()
+        
         # Создать окружение с правильной кодировкой и отключенным буфером
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
@@ -510,6 +544,45 @@ async def stream_logs():
                     yield f"data: {json.dumps(event_log[-1])}\n\n"
     
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@app.get("/api/config/get")
+async def get_current_config():
+    """Return safe config for UI display"""
+    safe_config = {
+        "telegram": {
+            "api_id": mask_string(str(telegram_config.get("api_id", "")), 3) if telegram_config.get("api_id") else "",
+            "api_hash": mask_string(telegram_config.get("api_hash", ""), 4) if telegram_config.get("api_hash") else "",
+            "phone": mask_string(telegram_config.get("phone", ""), 4) if telegram_config.get("phone") else "",
+            "session": telegram_config.get("session", "telegram_session"),
+            "is_configured": bool(telegram_config.get("api_id") and telegram_config.get("api_hash"))
+        },
+        "webhook_url": mask_string(config.get("webhook_url", ""), 8) if config.get("webhook_url") else "",
+        "monitored_chats": [{"id": chat["id"], "name": "Chat"} for chat in config.get("monitored_chats", [])],
+        "monitored_chats_count": len(config.get("monitored_chats", []))
+    }
+    return safe_config
+
+
+@app.post("/api/telegram/logout")
+async def logout_telegram():
+    """Logout from Telegram and delete session file"""
+    global telegram_client
+    
+    try:
+        if telegram_client:
+            await telegram_client.log_out()
+            await telegram_client.disconnect()
+            telegram_client = None
+        
+        # Delete session file
+        session_file = f"{telegram_config.get('session', 'telegram_session')}.session"
+        if os.path.exists(session_file):
+            os.remove(session_file)
+            
+        return {"status": "success", "message": "Сессия сброшена"}
+    except Exception as e:
+        raise HTTPException(500, f"Ошибка выхода: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
