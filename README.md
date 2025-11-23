@@ -1,60 +1,74 @@
-# Telegram Monitor Web Interface
+# Telegram Monitor Web UI
 
-A simple web interface for configuring and managing Telegram monitoring with real-time event logging.
+Веб-интерфейс для мониторинга Telegram чатов с AI-фильтрацией и отправкой уведомлений в N8N.
 
-## Features
+## Возможности
 
-- Web-based Telegram authorization (no command line input needed)
-- Chat selection interface with search functionality
-- Keyword management
-- N8N webhook configuration and testing
-- Real-time monitoring with live event logging
-- All configuration stored in `config.json`
+*   **Web UI**: Удобный интерфейс на базе FastAPI и TailwindCSS для управления настройками.
+*   **Telegram Auth**: Полная поддержка авторизации (включая 2FA/Cloud Password).
+*   **Выбор чатов**: Просмотр списка доступных диалогов и выбор чатов для мониторинга.
+*   **AI-фильтрация**: Интеграция с OpenAI (GPT-4o/GPT-5-nano) для анализа сообщений на релевантность (поиск вакансий, заказов).
+*   **Гибкие триггеры**: Возможность использования ключевых слов вместе с AI или отдельно.
+*   **Webhooks**: Отправка отфильтрованных сообщений в N8N или любую другую систему через вебхуки.
+*   **Live Logs**: Просмотр событий мониторинга в реальном времени через Server-Sent Events (SSE).
+*   **Стабильность**: Автоматический перезапуск мониторинга при разрыве соединения.
 
-## Installation
+## Установка
 
-1. Clone the repository
-2. Install the required dependencies:
-   ```
-   pip install -r requirements.txt
-   ```
-3. Run the application:
-   ```
-   python main.py
-   ```
-4. Open your browser and navigate to `http://localhost:8000`
+1.  **Клонируйте репозиторий:**
+    ```bash
+    git clone <repository-url>
+    cd <repository-folder>
+    ```
 
-## Usage
+2.  **Установите зависимости:**
+    ```bash
+    pip install -r requirements.txt
+    ```
 
-1. **Telegram Settings**: Enter your API ID, API Hash, Phone number, and Session name
-2. **Authorization**: Click "Авторизоваться" to start the authorization process
-3. **Chat Selection**: Click "Получить список чатов" to load your chats, select the ones to monitor
-4. **Keywords**: Add keywords to monitor in messages
-5. **Webhook**: Configure your N8N webhook URL
-6. **Monitoring**: Click "Запустить мониторинг" to start monitoring
+3.  **Запустите приложение:**
+    ```bash
+    python main.py
+    ```
+    Сервер запустится по адресу: `http://localhost:8000`
 
-## API Endpoints
+## Использование
 
-- `POST /api/telegram/save` - Save Telegram settings
-- `POST /api/telegram/auth/start` - Start Telegram authorization
-- `POST /api/telegram/auth/code` - Submit authorization code
-- `POST /api/telegram/auth/password` - Submit 2FA password
-- `GET /api/chats/list` - Get list of chats
-- `POST /api/chats/save` - Save selected chats
-- `POST /api/keywords/add` - Add keyword
-- `DELETE /api/keywords/{word}` - Delete keyword
-- `POST /api/webhook/save` - Save webhook URL
-- `POST /api/webhook/test` - Test webhook
-- `POST /api/monitor/start` - Start monitoring
-- `POST /api/monitor/stop` - Stop monitoring
-- `GET /api/monitor/status` - Get monitoring status
-- `GET /api/monitor/logs` - Stream monitoring logs (SSE)
+1.  **Настройки Telegram**:
+    *   Откройте веб-интерфейс.
+    *   Введите `API ID`, `API Hash` (получить на [my.telegram.org](https://my.telegram.org)) и номер телефона.
+    *   Нажмите "Сохранить настройки".
 
-## Files
+2.  **Авторизация**:
+    *   Нажмите кнопку "Авторизоваться".
+    *   Введите код из SMS/Telegram.
+    *   Если установлен облачный пароль (2FA), введите его в появившемся окне.
 
-- `main.py` - FastAPI backend
-- `index.html` - Web interface
-- `authorize.py` - Original authorization script (not used in web interface)
-- `list_chats.py` - Chat listing script
-- `monitor.py` - Monitoring script
-- `config.json` - Configuration file (created automatically)
+3.  **Выбор чатов**:
+    *   Нажмите "Получить список чатов".
+    *   Отметьте галочками нужные чаты и каналы.
+    *   Нажмите "Сохранить выбранные чаты".
+
+4.  **Настройка фильтров**:
+    *   Укажите URL вебхука (например, N8N workflow).
+    *   Включите "Использовать AI фильтр" и введите API Key OpenAI.
+    *   Настройте системный промпт и ключевые слова.
+
+5.  **Запуск**:
+    *   Нажмите "Запустить мониторинг".
+    *   Следите за новыми сообщениями в панели "Последние события".
+
+## Структура проекта
+
+*   `main.py` — Основной файл приложения (FastAPI backend). Управляет веб-сервером, настройками и процессом мониторинга.
+*   `monitor.py` — Скрипт мониторинга (запускается как подпроцесс). Подключается к Telegram, слушает сообщения, фильтрует их и отправляет вебхуки.
+*   `index.html` — Главная страница веб-интерфейса.
+*   `static/script.js` — Логика фронтенда (взаимодействие с API, обновление UI, SSE).
+*   `config.json` — Файл конфигурации (создается автоматически).
+*   `*.session` — Файлы сессий Telegram (не удаляйте их, чтобы сохранить авторизацию).
+
+## Требования
+
+*   Python 3.8+
+*   Аккаунт Telegram
+*   API Key OpenAI (опционально, для AI-фильтрации)
