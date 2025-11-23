@@ -1,0 +1,92 @@
+import asyncio
+import aiohttp
+from telethon import TelegramClient, events
+import json
+import os
+import sys
+
+# Установить кодировку для предотвращения UnicodeEncodeError
+if sys.platform == "win32":
+    os.environ["PYTHONIOENCODING"] = "utf-8"
+
+# Загрузить конфигурацию
+if not os.path.exists('config.json'):
+    print("ERROR: config.json не найден")
+    exit(1)
+
+with open('config.json', 'r', encoding='utf-8') as f:
+    config = json.load(f)
+
+API_ID = int(config['telegram']['api_id'])
+API_HASH = config['telegram']['api_hash']
+SESSION = config['telegram'].get('session', 'telegram_session')
+N8N_WEBHOOK = config.get('webhook_url', '')
+MONITORED_CHATS = [chat['id'] for chat in config.get('monitored_chats', [])]
+KEYWORDS = config.get('keywords', [])
+
+print("Мониторинг запущен")
+print(f"Чаты: {MONITORED_CHATS}")
+print(f"Ключевые слова: {KEYWORDS}")
+print(f"Webhook: {N8N_WEBHOOK}")
+
+client = TelegramClient(SESSION, API_ID, API_HASH)
+
+async def send_to_n8n(message_data):
+    """Отправить в N8N вебхук"""
+    async with aiohttp.ClientSession() as session:
+        try:
+            print("Отправка в webhook...")
+            async with session.post(
+                N8N_WEBHOOK,
+                json=message_data,
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
+                if resp.status == 200:
+                    print('Отправлено в N8N')
+                else:
+                    print(f'N8N вернул статус {resp.status}')
+                    text = await resp.text()
+                    print(f'Ответ: {text}')
+        except Exception as e:
+            print(f'Ошибка отправки в N8N: {e}')
+
+@client.on(events.NewMessage(chats=MONITORED_CHATS))
+async def handler(event):
+    """Обработчик новых сообщений"""
+    text = event.message.text or ''
+    
+    # Проверить ЛЮБОЕ ключевое слово БЕЗ УЧЁТА РЕГИСТРА
+    text_lower = text.lower()
+    found_keywords = [kw for kw in KEYWORDS if kw.lower() in text_lower]
+    
+    if found_keywords:
+        # Минимизировать вывод в консоль для предотвращения UnicodeEncodeError
+        # print(f"Найдены ключевые слова: {found_keywords}")
+        # print(f"Текст: {text[:100]}...")
+        
+        chat = await event.get_chat()
+        
+        message_data = {
+            'chat_id': event.chat_id,
+            'chat_name': getattr(chat, 'title', None) or getattr(chat, 'first_name', 'Unknown'),
+            'message_id': event.message.id,
+            'text': text,
+            'date': event.message.date.isoformat(),
+            'sender_id': event.sender_id,
+            'keywords_found': found_keywords
+        }
+        
+        await send_to_n8n(message_data)
+
+def main():
+    """Главная функция"""
+    client.start()
+    print('Подключено к Telegram')
+    print(f'Мониторинг чатов: {MONITORED_CHATS}')
+    print(f'Поиск по ключевым словам: {KEYWORDS}')
+    print('Ожидание сообщений...\n')
+    
+    client.run_until_disconnected()
+
+if __name__ == '__main__':
+    main()
